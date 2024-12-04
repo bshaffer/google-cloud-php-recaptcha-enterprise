@@ -1,0 +1,64 @@
+name: Test Suite
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest]
+        php: [ "7.4", "8.0", "8.1", "8.2", "8.3", "8.4" ]
+        extensions: ["grpc-1.54.0"]
+        type: ["Unit Test"]
+        include:
+          - platform: "ubuntu-latest"
+            php: "8.0"
+            extensions: "protobuf,grpc-1.54.0"
+            type: "Unit Test + protobuf extension"
+    name: PHP ${{ matrix.php }} ${{ matrix.type }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.platform }}
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup cache environment
+      id: extcache
+      uses: shivammathur/cache-extensions@v1
+      with:
+        php-version: ${{ matrix.php }}
+        extensions: sodium,${{ matrix.extensions }}
+        key: cache-key-1 # increment to bust the cache
+    - name: Cache extensions
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.extcache.outputs.dir }}
+        key: ${{ steps.extcache.outputs.key }}
+        restore-keys: ${{ steps.extcache.outputs.key }}
+    - name: Setup PHP
+      uses: shivammathur/setup-php@verbose
+      with:
+        php-version: ${{ matrix.php }}
+        extensions: sodium,${{ matrix.extensions }}
+    - name: Install Dependencies
+      uses: nick-invision/retry@v3
+      with:
+        timeout_minutes: 10
+        max_attempts: 3
+        command: composer --no-interaction --no-ansi --no-progress update
+    - if: ${{ matrix.platform == 'windows-latest' }}
+      name: Run Unit Test Suite (Windows)
+      run: |
+        vendor/bin/phpunit -c phpunit.xml.dist
+        if ( "$?" -ne "0" )
+        {
+          echo "*** RETRYING FLAKEY PHPUNIT ON WINDOWS ***"
+          vendor/bin/phpunit -c phpunit.xml.dist
+        }
+    - if: ${{ matrix.platform != 'windows-latest' }}
+      name: Run Unit Test Suite
+      run: |
+        vendor/bin/phpunit -c phpunit.xml.dist
